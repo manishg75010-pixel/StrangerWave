@@ -1,3 +1,4 @@
+
 const socket = io();
 const statusEl = document.getElementById("status");
 const messages = document.getElementById("messages");
@@ -10,18 +11,24 @@ const disconnectButton = document.getElementById("disconnectButton");
 const languageButton = document.getElementById("languageButton");
 const languageMenu = document.getElementById("languageMenu");
 const languageSelect = document.getElementById("languageSelect");
+
 let connectedToStranger = false;
 
-function setStatus(message) { statusEl.textContent = message; }
+function setStatus(message) {
+  statusEl.textContent = message;
+}
+
 function addMessage(text, kind) {
   const welcome = messages.querySelector(".welcome");
   if (welcome) welcome.remove();
+
   const el = document.createElement("div");
   el.className = kind === "system" ? "system-message" : `message ${kind}`;
   el.textContent = text;
   messages.appendChild(el);
   messages.scrollTop = messages.scrollHeight;
 }
+
 function resetChat(message) {
   connectedToStranger = false;
   input.disabled = true;
@@ -31,44 +38,65 @@ function resetChat(message) {
   disconnectButton.disabled = true;
   findButton.disabled = false;
   findButton.textContent = "✦ Find Stranger";
+
   if (message) addMessage(message, "system");
 }
+
+function getProfileOptions() {
+  return {
+    ageRange: document.getElementById("ageRange").value,
+    gender: document.getElementById("gender").value
+  };
+}
+
 findButton.addEventListener("click", () => {
   messages.innerHTML = "";
   findButton.disabled = true;
   setStatus("Searching for a stranger…");
-  socket.emit("find-stranger");
+  socket.emit("find-stranger", getProfileOptions());
 });
+
 nextButton.addEventListener("click", () => {
   messages.innerHTML = "";
   connectedToStranger = false;
   input.disabled = true;
   sendButton.disabled = true;
   nextButton.disabled = true;
+  disconnectButton.disabled = true;
   setStatus("Finding someone new…");
-  socket.emit("next-stranger");
+  socket.emit("next-stranger", getProfileOptions());
 });
+
 disconnectButton.addEventListener("click", () => {
   socket.emit("disconnect-stranger");
   resetChat("You disconnected.");
   setStatus("Disconnected");
 });
+
 form.addEventListener("submit", (event) => {
   event.preventDefault();
+
   const text = input.value.trim();
   if (!text || !connectedToStranger) return;
+
   addMessage(text, "mine");
   socket.emit("chat-message", text);
   input.value = "";
   input.focus();
 });
+
 socket.on("status", (message) => {
   setStatus(message);
+
   if (message.startsWith("Searching")) {
     findButton.disabled = true;
     findButton.textContent = "Searching…";
+  } else if (!connectedToStranger) {
+    findButton.disabled = false;
+    findButton.textContent = "✦ Find Stranger";
   }
 });
+
 socket.on("matched", () => {
   connectedToStranger = true;
   input.disabled = false;
@@ -81,22 +109,32 @@ socket.on("matched", () => {
   addMessage("You're connected. Say hello!", "system");
   input.focus();
 });
-socket.on("chat-message", (text) => addMessage(text, "theirs"));
+
+socket.on("chat-message", (text) => {
+  addMessage(text, "theirs");
+});
+
 socket.on("partner-left", () => {
   resetChat("The stranger disconnected. Press Find Stranger to meet someone else.");
   setStatus("Stranger disconnected");
 });
-socket.on("connect_error", () => setStatus("Can't connect to the server. Please refresh the page."));
+
+socket.on("connect_error", () => {
+  setStatus("Can't connect to the server. Please refresh the page.");
+});
+
 languageButton.addEventListener("click", () => {
   const hidden = languageMenu.classList.toggle("hidden");
   languageButton.setAttribute("aria-expanded", String(!hidden));
 });
+
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".language-wrap")) {
     languageMenu.classList.add("hidden");
     languageButton.setAttribute("aria-expanded", "false");
   }
 });
+
 languageSelect.addEventListener("change", () => {
   languageButton.textContent = `↗ ${languageSelect.value}`;
 });
