@@ -9,192 +9,273 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
+const SEARCH_TIMEOUT = 30_000;
+const BOT_REPLY_DELAY = 600;
 
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, app: "StrangerWave" });
+  res.json({ status: "ok" });
 });
 
-const waitingUsers = [];
-const partnerBySocket = new Map();
+const waitingUsers = new Set();
+const partners = new Map();
+const searchTimers = new Map();
+const botTimers = new Map();
 
-const AGE_RANGES = ["18-24", "25-34", "35-44", "45-54", "55+"];
-
-const GENDERS = [
-  "man",
-  "woman",
-  "non-binary",
-  "prefer-not-to-say"
-];
-
-function cleanPreferences(options = {}) {
-  const ageRange = AGE_RANGES.includes(options.ageRange)
-    ? options.ageRange
-    : "18-24";
-
-  const gender = GENDERS.includes(options.gender)
-    ? options.gender
-    : "prefer-not-to-say";
-
-  const preferredAgeRange =
-    options.preferredAgeRange === "any" ||
-    AGE_RANGES.includes(options.preferredAgeRange)
-      ? options.preferredAgeRange
-      : "any";
-
-  const preferredGender = [
-    "any",
-    ...GENDERS
-  ].includes(options.preferredGender)
-    ? options.preferredGender
-    : "any";
-
-  return {
-    ageRange,
-    gender,
-    preferredAgeRange,
-    preferredGender
-  };
+function clearSearchTimer(id) {
+  const timer = searchTimers.get(id);
+  if (timer) clearTimeout(timer);
+  searchTimers.delete(id);
 }
 
-function acceptsPreference(preferences, other) {
-  const ageMatches =
-    preferences.preferredAgeRange === "any" ||
-    preferences.preferredAgeRange === other.ageRange;
-
-  const genderMatches =
-    preferences.preferredGender === "any" ||
-    preferences.preferredGender === other.gender;
-
-  return ageMatches && genderMatches;
+function clearBotTimer(id) {
+  const timer = botTimers.get(id);
+  if (timer) clearTimeout(timer);
+  botTimers.delete(id);
 }
 
-function canMatch(userA, userB) {
-  return (
-    acceptsPreference(userA, userB) &&
-    acceptsPreference(userB, userA)
-  );
+function removeFromWaiting(id) {
+  waitingUsers.delete(id);
+  clearSearchTimer(id);
 }
 
-function sendStatus(socket, message) {
-  if (socket && socket.connected) {
-    socket.emit("status", message);
-  }
+function endBotChat(socket) {
+  clearBotTimer(socket.id);
+  socket.data.botMode = false;
+  socket.data.botReplyIndex = 0;
 }
 
-function removeFromWaiting(socketId) {
-  const index = waitingUsers.indexOf(socketId);
-
-  if (index !== -1) {
-    waitingUsers.splice(index, 1);
-  }
-}
-
-function unpair(socket, notifyPartner = true) {
-  removeFromWaiting(socket.id);
-
-  const partnerId = partnerBySocket.get(socket.id);
+function disconnectPartner(socket, notifyPartner = true) {
+  const partnerId = partners.get(socket.id);
   if (!partnerId) return;
 
-  partnerBySocket.delete(socket.id);
-  partnerBySocket.delete(partnerId);
+  partners.delete(socket.id);
+  partners.delete(partnerId);
 
   const partner = io.sockets.sockets.get(partnerId);
 
-  if (partner && partner.connected) {
-    if (notifyPartner) {
-      partner.emit("partner-left");
-      sendStatus(partner, "Your stranger disconnected.");
-    }
+  if (partner) {
+    endBotChat(partner);
+    partner.emit("partner-left");
+    partner.emit("status", "Stranger disconnected.");
+  }
+
+  if (notifyPartner) {
+    socket.emit("partner-left");
   }
 }
 
-function findStranger(socket, options = {}) {
-  unpair(socket, true);
+function getBotReply(message, socket) {
+  const text = message.toLowerCase().trim();
+  const clean = text.replace(/[^\p{L}\p{N}\s]/gu, "");
+
+  if (/\b(hi|hello|hey|hii|namaste|नमस्ते|हेलो)\b/.test(clean)) {
+    return "Hey! 😊 How are you doing today?";
+  }
+
+  if (
+    /\bhow are you\b|\bhow r u\b|\bhow about you\b/.test(clean)
+  ) {
+    return "I'm doing well, thanks for asking! 😊 What are you up to?";
+  }
+
+  if (
+    /\byour name\b|\bwho are you\b|\bare you real\b/.test(clean)
+  ) {
+    return "I'm StrangerWave's virtual companion, not a real person. 😊";
+  }
+
+  if (/\bwhere are you from\b|\bwhere do you live\b/.test(clean)) {
+    return "I'm a virtual companion, so I don't have a physical hometown. Where are you from?";
+  }
+
+  if (/\bwhat do you like\b|\byour hobbies\b|\bhobby\b/.test(clean)) {
+    return "I enjoy friendly conversations! What do you like doing in your free time?";
+  }
+
+  if (/\bsad\b|\bupset\b|\blonely\b|\bbad day\b/.test(clean)) {
+    return "I'm sorry you're feeling that way. 💙 Want to tell me a little more about it?";
+  }
+
+  if (/\bjoke\b|\bmake me laugh\b/.test(clean)) {
+    return "Why did the computer go to the doctor? It had a virus! 😄";
+  }
+
+  if (/\bthank you\b|\bthanks\b/.test(clean)) {
+    return "You're welcome! 😊 What else would you like to talk about?";
+  }
+
+  if (/\bbye\b|\bgoodbye\b|\bsee you\b/.test(clean)) {
+    return "It was nice chatting with you! 👋 Press Next Stranger whenever you want to start again.";
+  }
+
+  if (/\b(age|old are you)\b/.test(clean)) {
+    return "I don't have a human age because I'm a virtual companion. 😊";
+  }
+
+  const replies = [
+    "That's interesting! Tell me a little more. 😊",
+    "I see! What made you think about that?",
+    "Really? I'd like to hear more about it.",
+    "Nice! What else is on your mind?",
+    "Interesting point. How has your day been so far?"
+  ];
+
+  const index = socket.data.botReplyIndex || 0;
+  socket.data.botReplyIndex = index + 1;
+
+  return replies[index % replies.length];
+}
+
+function startBotChat(socket) {
+  if (!socket.connected) return;
+
   removeFromWaiting(socket.id);
 
-  socket.data.preferences = cleanPreferences(options);
+  if (partners.has(socket.id)) {
+    disconnectPartner(socket, false);
+  }
 
-  for (let i = 0; i < waitingUsers.length; i++) {
-    const otherId = waitingUsers[i];
-    const other = io.sockets.sockets.get(otherId);
+  socket.data.botMode = true;
+  socket.data.botReplyIndex = 0;
 
-    if (!other || !other.connected) {
-      waitingUsers.splice(i, 1);
-      i--;
+  socket.emit("matched");
+  socket.emit(
+    "status",
+    "No stranger found in 30 seconds. Your free virtual companion is ready."
+  );
+  socket.emit(
+    "chat-message",
+    "Hi! 👋 I'm StrangerWave's free virtual companion, not a real person. What would you like to talk about?"
+  );
+}
+
+function findStranger(socket, profile = {}) {
+  removeFromWaiting(socket.id);
+  clearBotTimer(socket.id);
+  disconnectPartner(socket);
+  endBotChat(socket);
+
+  // Save profile details, but do not restrict who can match.
+  socket.data.profile = {
+    ageRange: String(profile.ageRange || ""),
+    gender: String(profile.gender || "")
+  };
+
+  for (const waitingId of waitingUsers) {
+    const waitingSocket = io.sockets.sockets.get(waitingId);
+
+    if (!waitingSocket || waitingId === socket.id) {
+      removeFromWaiting(waitingId);
       continue;
     }
 
-    if (other.id === socket.id) continue;
-
-    const myPreferences = socket.data.preferences;
-    const theirPreferences =
-      other.data.preferences || cleanPreferences();
-
-    if (!canMatch(myPreferences, theirPreferences)) {
+    // A waiting user may have disconnected or changed state.
+    if (partners.has(waitingId) || waitingSocket.data.botMode) {
+      removeFromWaiting(waitingId);
       continue;
     }
 
-    waitingUsers.splice(i, 1);
+    removeFromWaiting(waitingId);
+    clearSearchTimer(socket.id);
 
-    partnerBySocket.set(socket.id, other.id);
-    partnerBySocket.set(other.id, socket.id);
+    partners.set(socket.id, waitingId);
+    partners.set(waitingId, socket.id);
+
+    socket.data.botMode = false;
+    waitingSocket.data.botMode = false;
 
     socket.emit("matched");
-    other.emit("matched");
+    waitingSocket.emit("matched");
 
-    sendStatus(socket, "Stranger connected. Say hello!");
-    sendStatus(other, "Stranger connected. Say hello!");
+    socket.emit("status", "Connected to a stranger!");
+    waitingSocket.emit("status", "Connected to a stranger!");
 
     return;
   }
 
-  waitingUsers.push(socket.id);
+  waitingUsers.add(socket.id);
+  socket.emit("status", "Searching for a stranger…");
 
-  sendStatus(
-    socket,
-    "Searching for a compatible stranger… Keep this page open."
-  );
+  const timer = setTimeout(() => {
+    searchTimers.delete(socket.id);
+
+    if (waitingUsers.has(socket.id)) {
+      startBotChat(socket);
+    }
+  }, SEARCH_TIMEOUT);
+
+  searchTimers.set(socket.id, timer);
 }
 
 io.on("connection", (socket) => {
-  socket.on("find-stranger", (options) => {
-    findStranger(socket, options || {});
+  socket.data.botMode = false;
+  socket.data.botReplyIndex = 0;
+
+  socket.emit("status", "Ready to chat. Press Find Stranger.");
+
+  socket.on("find-stranger", (profile) => {
+    findStranger(socket, profile || {});
+  });
+
+  socket.on("next-stranger", (profile) => {
+    findStranger(socket, profile || {});
   });
 
   socket.on("chat-message", (message) => {
-    const partnerId = partnerBySocket.get(socket.id);
-    const text = String(message || "").trim().slice(0, 1000);
+    if (typeof message !== "string") return;
 
-    if (!partnerId || !text) return;
+    const text = message.trim();
+    if (!text || text.length > 2000) return;
+
+    if (socket.data.botMode) {
+      clearBotTimer(socket.id);
+
+      const timer = setTimeout(() => {
+        botTimers.delete(socket.id);
+
+        if (socket.connected && socket.data.botMode) {
+          socket.emit("chat-message", getBotReply(text, socket));
+        }
+      }, BOT_REPLY_DELAY);
+
+      botTimers.set(socket.id, timer);
+      return;
+    }
+
+    const partnerId = partners.get(socket.id);
+    if (!partnerId) return;
 
     const partner = io.sockets.sockets.get(partnerId);
 
-    if (partner && partner.connected) {
-      partner.emit("chat-message", text);
+    if (!partner || !partner.connected) {
+      disconnectPartner(socket, false);
+      socket.emit("partner-left");
+      socket.emit("status", "Stranger disconnected. Find someone new.");
+      return;
     }
-  });
 
-  socket.on("next-stranger", (options) => {
-    unpair(socket, true);
-    findStranger(socket, options || socket.data.preferences || {});
+    partner.emit("chat-message", text);
   });
 
   socket.on("disconnect-stranger", () => {
-    unpair(socket, true);
+    removeFromWaiting(socket.id);
+    clearBotTimer(socket.id);
+    disconnectPartner(socket);
+    endBotChat(socket);
 
-    sendStatus(
-      socket,
-      "Disconnected. Press Find Stranger to start again."
-    );
+    socket.emit("status", "Disconnected. Press Find Stranger to chat again.");
   });
 
   socket.on("disconnect", () => {
-    unpair(socket, true);
+    removeFromWaiting(socket.id);
+    clearBotTimer(socket.id);
+    disconnectPartner(socket);
+    endBotChat(socket);
   });
 });
 
 server.listen(PORT, () => {
-  console.log(`StrangerWave is running on port ${PORT}`);
+  console.log(`StrangerWave server running on port ${PORT}`);
 });
