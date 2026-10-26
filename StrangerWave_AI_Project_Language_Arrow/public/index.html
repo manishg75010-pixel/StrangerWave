@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111326">
+  <title>StrangerWave — Anonymous Chat</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <a class="brand" href="#"><span class="logo">✦</span> StrangerWave</a>
+      <div class="language-wrap">
+        <button id="languageButton" class="language-button" aria-expanded="false">↗ Language</button>
+        <div id="languageMenu" class="language-menu hidden">
+          <label for="languageSelect">Choose language</label>
+          <select id="languageSelect">
+            <option value="English">English</option><option value="Hindi">Hindi</option>
+            <option value="Spanish">Spanish</option><option value="French">French</option>
+            <option value="German">German</option><option value="Arabic">Arabic</option>
+          </select>
+          <p class="small">This sets your preferred language. Automatic translation is not connected yet.</p>
+        </div>
+      </div>
+    </header>
+    <section class="hero">
+      <div class="eyebrow"><span class="live-dot"></span> MEET SOMEONE NEW</div>
+      <h1>One click. A new<br><span>conversation.</span></h1>
+      <p class="subtitle">Chat anonymously with a stranger. Be kind, stay curious, and see where the conversation goes.</p>
+    </section>
+    <section class="chat-card">
+      <div class="chat-heading">
+        <div><div class="chat-title">Stranger chat</div><div id="status" class="status">Ready when you are</div></div>
+        <div class="anonymous-pill"><span>●</span> Anonymous</div>
+      </div>
+      <div id="messages" class="messages">
+        <div class="welcome"><div class="welcome-icon">✦</div><strong>Your next conversation starts here</strong><p>Press <b>Find Stranger</b> to connect with someone who is online.</p></div>
+      </div>
+      <form id="messageForm" class="composer">
+        <input id="messageInput" type="text" maxlength="1000" placeholder="Find a stranger first…" autocomplete="off" disabled>
+        <button id="sendButton" type="submit" disabled aria-label="Send message">➤</button>
+      </form>
+      <div class="actions">
+        <button id="findButton" class="primary">✦ Find Stranger</button>
+        <button id="nextButton" class="secondary" disabled>Next Stranger ↗</button>
+        <button id="disconnectButton" class="quiet" disabled>Disconnect</button>
+      </div>
+      <p class="privacy">⚑ Don't share passwords, payment details, or personal information with strangers.</p>
+    </section>
+    <footer>StrangerWave · Talk to the world, one conversation at a time.</footer>
+  </main>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
