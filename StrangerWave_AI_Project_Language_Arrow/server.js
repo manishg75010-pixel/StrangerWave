@@ -1,4 +1,3 @@
-```js
 const express = require("express");
 const http = require("http");
 const path = require("path");
@@ -318,4 +317,3 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`StrangerWave server running on port ${PORT}`);
 });
-```
