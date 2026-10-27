@@ -6,6 +6,12 @@ const input = document.getElementById("messageInput");
 const form = document.getElementById("messageForm");
 const sendButton = document.getElementById("sendButton");
 const findButton = document.getElementById("findButton");
+const termsCheckbox = document.getElementById("termsCheckbox");
+findButton.disabled = !termsCheckbox.checked;
+
+termsCheckbox.addEventListener("change", () => {
+  findButton.disabled = !termsCheckbox.checked;
+});
 const nextButton = document.getElementById("nextButton");
 const disconnectButton = document.getElementById("disconnectButton");
 const languageButton = document.getElementById("languageButton");
@@ -91,7 +97,7 @@ function resetChat(message) {
   input.placeholder = "Find a stranger first…";
   nextButton.disabled = true;
   disconnectButton.disabled = true;
-  findButton.disabled = false;
+  findButton.disabled = !termsCheckbox.checked;
   findButton.textContent = "✦ Find Stranger";
 
   if (message) addMessage(message, "system");
@@ -105,6 +111,12 @@ function getProfileOptions() {
 }
 
 findButton.addEventListener("click", () => {
+  if (!termsCheckbox.checked) {
+    setStatus("Please accept the Terms & Conditions first.");
+    termsCheckbox.focus();
+    return;
+  }
+
   messages.innerHTML = "";
   messageElements.clear();
   seenMessages.clear();
@@ -182,7 +194,7 @@ socket.on("status", (message) => {
     findButton.disabled = true;
     findButton.textContent = "Searching…";
   } else if (!connectedToStranger) {
-    findButton.disabled = false;
+    findButton.disabled = !termsCheckbox.checked;
     findButton.textContent = "✦ Find Stranger";
   }
 });
