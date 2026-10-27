@@ -1,4 +1,3 @@
-```js
 const socket = io();
 
 const statusEl = document.getElementById("status");
@@ -261,4 +260,3 @@ document.addEventListener("click", (event) => {
 languageSelect.addEventListener("change", () => {
   languageButton.textContent = `↗ ${languageSelect.value}`;
 });
-```
