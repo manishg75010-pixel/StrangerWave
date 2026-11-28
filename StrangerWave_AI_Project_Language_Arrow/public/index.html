@@ -114,6 +114,29 @@
 </div>
 
     </section>
+ <section class="social-panel" aria-label="Direct chats">
+      <div class="social-heading"><h2>Your chats</h2><span class="small">Private conversations · 7-day history</span></div>
+      <div class="social-columns">
+        <div class="social-list-panel">
+          <h3>Chat List <span id="chatListCount">0/100</span></h3>
+          <div id="chatList" class="people-list"><p class="small">Your saved chats will appear here.</p></div>
+          <h3 class="online-heading">Online users</h3>
+          <div id="onlineUsers" class="people-list"><p class="small">Loading online users…</p></div>
+        </div>
+        <div class="direct-chat-panel">
+          <div class="direct-chat-title"><strong id="directChatTitle">Select someone to chat</strong><button id="removeContactButton" class="quiet" type="button" disabled>Remove</button></div>
+          <div id="directMessages" class="direct-messages"><p class="small">Choose a person from your Chat List or Online users.</p></div>
+          <form id="directMessageForm" class="composer direct-composer">
+            <input id="directMessageInput" type="text" maxlength="1000" placeholder="Select a person first…" autocomplete="off" disabled>
+            <button id="imageButton" type="button" disabled aria-label="Send image">＋</button>
+            <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+            <button id="directSendButton" type="submit" disabled aria-label="Send private message">➤</button>
+          </form>
+          <p id="directStatus" class="small" aria-live="polite">Images are compressed to 200 KB before sending.</p>
+        </div>
+      </div>
+    </section>
+
  <section class="chat-card">
       <div class="chat-heading">
         <div>

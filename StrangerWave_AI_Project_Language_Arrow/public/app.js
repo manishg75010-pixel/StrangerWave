@@ -272,3 +272,248 @@ document.addEventListener("click", (event) => {
 languageSelect.addEventListener("change", () => {
   languageButton.textContent = `↗ ${languageSelect.value}`;
 });
+
+/* Direct chat, online users and seven-day message history */
+const chatListEl = document.getElementById("chatList");
+const chatListCountEl = document.getElementById("chatListCount");
+const onlineUsersEl = document.getElementById("onlineUsers");
+const directTitleEl = document.getElementById("directChatTitle");
+const directMessagesEl = document.getElementById("directMessages");
+const directForm = document.getElementById("directMessageForm");
+const directInput = document.getElementById("directMessageInput");
+const directSendButton = document.getElementById("directSendButton");
+const removeContactButton = document.getElementById("removeContactButton");
+const imageButton = document.getElementById("imageButton");
+const imageInput = document.getElementById("imageInput");
+const directStatusEl = document.getElementById("directStatus");
+let selectedContactId = "";
+let selectedContactName = "";
+let savedContacts = [];
+let currentOnlineUsers = [];
+
+function getBrowserSessionId() {
+  const token = sessionStorage.getItem("strangerwave_session_token") || "";
+  return token.split(".")[0] || "";
+}
+
+function registerBrowserSession() {
+  const sessionToken = sessionStorage.getItem("strangerwave_session_token") || "";
+  const displayName = (displayNameInput?.value || "").trim();
+  socket.emit("register-session", { sessionToken, displayName }, result => {
+    if (!result?.ok) {
+      if (directStatusEl) directStatusEl.textContent = result?.error || "Could not start private chat.";
+      return;
+    }
+    if (displayNameInput && !displayNameInput.value) displayNameInput.value = result.name;
+  });
+}
+
+socket.on("session-token", token => sessionStorage.setItem("strangerwave_session_token", token));
+socket.on("connect", registerBrowserSession);
+
+function showEmptyDirectMessage(message) {
+  if (!directMessagesEl) return;
+  directMessagesEl.innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "small";
+  p.textContent = message;
+  directMessagesEl.appendChild(p);
+}
+
+function renderDirectMessage(message) {
+  if (!directMessagesEl || !message) return;
+  const empty = directMessagesEl.querySelector("p.small");
+  if (empty) empty.remove();
+  const item = document.createElement("div");
+  item.className = `direct-message${message.mine || message.senderId === getBrowserSessionId() ? " mine" : ""}`;
+  if (message.type === "image" && message.imageUrl) {
+    const img = document.createElement("img");
+    img.src = message.imageUrl;
+    img.alt = "Shared image";
+    img.loading = "lazy";
+    item.appendChild(img);
+  } else {
+    item.textContent = message.text || "";
+  }
+  if (message.createdAt) {
+    const time = document.createElement("small");
+    const date = new Date(message.createdAt);
+    time.textContent = Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+    item.appendChild(time);
+  }
+  directMessagesEl.appendChild(item);
+  directMessagesEl.scrollTop = directMessagesEl.scrollHeight;
+}
+
+function openDirectChat(contactId, name) {
+  if (!contactId) return;
+  selectedContactId = contactId;
+  selectedContactName = name || "Stranger";
+  directTitleEl.textContent = selectedContactName;
+  directInput.disabled = false;
+  directSendButton.disabled = false;
+  imageButton.disabled = false;
+  removeContactButton.disabled = !savedContacts.some(item => item.contactId === contactId);
+  directInput.placeholder = `Message ${selectedContactName}…`;
+  showEmptyDirectMessage("Loading recent messages…");
+  socket.emit("get-chat-history", contactId);
+  renderPeopleLists();
+  directInput.focus();
+}
+
+function renderPeopleLists() {
+  if (!chatListEl || !onlineUsersEl) return;
+  chatListEl.innerHTML = "";
+  if (chatListCountEl) chatListCountEl.textContent = `${savedContacts.length}/100`;
+  if (!savedContacts.length) {
+    const empty = document.createElement("p"); empty.className = "small";
+    empty.textContent = "No saved chats yet. Start a direct chat with someone online.";
+    chatListEl.appendChild(empty);
+  }
+  savedContacts.forEach(person => {
+    const row = document.createElement("button"); row.type = "button";
+    row.className = `person-row${selectedContactId === person.contactId ? " active" : ""}`;
+    const name = document.createElement("span"); name.className = "person-name"; name.textContent = person.name;
+    const state = document.createElement("span"); state.className = "person-state"; state.textContent = person.isOnline ? "● Online" : "Offline";
+    row.append(name, state);
+    row.addEventListener("click", () => openDirectChat(person.contactId, person.name));
+    chatListEl.appendChild(row);
+  });
+  onlineUsersEl.innerHTML = "";
+  const visibleUsers = currentOnlineUsers.filter(person => person.userId !== getBrowserSessionId());
+  if (!visibleUsers.length) {
+    const empty = document.createElement("p"); empty.className = "small"; empty.textContent = "No other users online right now.";
+    onlineUsersEl.appendChild(empty);
+  }
+  visibleUsers.forEach(person => {
+    const row = document.createElement("button"); row.type = "button"; row.className = "person-row";
+    const name = document.createElement("span"); name.className = "person-name"; name.textContent = person.name;
+    const action = document.createElement("span"); action.className = "person-state"; action.textContent = "● Chat";
+    row.append(name, action);
+    row.addEventListener("click", () => openDirectChat(person.userId, person.name));
+    onlineUsersEl.appendChild(row);
+  });
+}
+
+socket.on("chat-list", list => {
+  savedContacts = Array.isArray(list) ? list : [];
+  renderPeopleLists();
+  if (selectedContactId) {
+    const current = savedContacts.find(item => item.contactId === selectedContactId);
+    if (current) {
+      selectedContactName = current.name;
+      directTitleEl.textContent = current.name;
+      removeContactButton.disabled = false;
+    } else {
+      selectedContactId = "";
+      directTitleEl.textContent = "Select someone to chat";
+      directInput.disabled = true; directSendButton.disabled = true; imageButton.disabled = true; removeContactButton.disabled = true;
+      showEmptyDirectMessage("This contact is no longer in your Chat List.");
+    }
+  }
+});
+socket.on("online-users", users => { currentOnlineUsers = Array.isArray(users) ? users : []; renderPeopleLists(); });
+socket.on("chat-history", data => {
+  if (!data || data.contactId !== selectedContactId) return;
+  directMessagesEl.innerHTML = "";
+  if (!data.messages?.length) { showEmptyDirectMessage("No messages yet. Say hello!"); return; }
+  let lastDay = "";
+  data.messages.forEach(message => {
+    const date = new Date(message.createdAt);
+    const dayKey = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+    if (dayKey && dayKey !== lastDay) {
+      const divider = document.createElement("div");
+      divider.className = "direct-day-divider";
+      divider.textContent = dayKey;
+      directMessagesEl.appendChild(divider);
+      lastDay = dayKey;
+    }
+    renderDirectMessage({ ...message, mine: message.senderId === getBrowserSessionId() });
+  });
+});
+socket.on("private-message", message => {
+  if (!message) return;
+  if (message.contactId === selectedContactId) renderDirectMessage(message);
+  if (directStatusEl) directStatusEl.textContent = "Message sent. Recent history is saved for 7 days.";
+});
+socket.on("contact-removed", contactId => {
+  savedContacts = savedContacts.filter(item => item.contactId !== contactId);
+  if (selectedContactId === contactId) {
+    selectedContactId = ""; selectedContactName = "";
+    directTitleEl.textContent = "Select someone to chat";
+    directInput.disabled = true; directSendButton.disabled = true; imageButton.disabled = true; removeContactButton.disabled = true;
+    showEmptyDirectMessage("Contact and shared chat history removed.");
+  }
+  renderPeopleLists();
+});
+socket.on("feature-error", message => { if (directStatusEl) directStatusEl.textContent = message; });
+
+if (directForm) directForm.addEventListener("submit", event => {
+  event.preventDefault();
+  const text = directInput.value.trim();
+  if (!selectedContactId || !text) return;
+  socket.emit("private-message", { contactId: selectedContactId, text, id: `${Date.now()}-${Math.random().toString(36).slice(2)}` });
+  directInput.value = "";
+  if (directStatusEl) directStatusEl.textContent = "Sending…";
+});
+
+removeContactButton?.addEventListener("click", () => {
+  if (!selectedContactId) return;
+  if (window.confirm("Remove this contact and delete this conversation and its shared images for both people?")) {
+    socket.emit("remove-contact", selectedContactId);
+  }
+});
+
+async function compressImage(file) {
+  if (!file || !/^image\/(jpeg|png|webp)$/.test(file.type)) throw new Error("Choose a JPG, PNG or WebP image.");
+  const image = await new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not read this image.")); };
+    img.src = url;
+  });
+  const canvas = document.createElement("canvas");
+  let width = image.naturalWidth, height = image.naturalHeight;
+  const maxSide = 1280;
+  if (Math.max(width, height) > maxSide) {
+    const scale = maxSide / Math.max(width, height);
+    width = Math.round(width * scale); height = Math.round(height * scale);
+  }
+  canvas.width = width; canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.drawImage(image, 0, 0, width, height);
+  let quality = 0.82;
+  let blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", quality));
+  while (blob && blob.size > 200 * 1024 && quality > 0.35) {
+    quality -= 0.08;
+    blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", quality));
+  }
+  if (!blob || blob.size > 200 * 1024) throw new Error("This image cannot be compressed below 200 KB. Choose a smaller image.");
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Could not prepare image."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+imageButton?.addEventListener("click", () => imageInput.click());
+imageInput?.addEventListener("change", async () => {
+  const file = imageInput.files?.[0];
+  if (!file || !selectedContactId) return;
+  try {
+    directStatusEl.textContent = "Compressing image…";
+    const dataUrl = await compressImage(file);
+    socket.emit("private-image", { contactId: selectedContactId, dataUrl });
+    directStatusEl.textContent = "Sending image…";
+  } catch (error) { directStatusEl.textContent = error.message; }
+  imageInput.value = "";
+});
+
+saveNameButton?.addEventListener("click", () => {
+  setTimeout(() => {
+    const sessionToken = sessionStorage.getItem("strangerwave_session_token") || "";
+    socket.emit("register-session", { sessionToken, displayName: displayNameInput.value.trim() });
+  }, 100);
+});
